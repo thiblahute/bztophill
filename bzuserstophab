@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+
+"""Import all users defined in a Bugzilla XML file in phabricator
+with the Phabricator add_user.php script.
+
+This script should be used before using Phabricator's Phill unless
+you are sure all users already exist.
+
+Usage:
+  bzuserstophab <bz.xml> <add-user-php-script-path> <admin-username>
+
+Options:
+  -h --help             Show this screen.
+  --version             Show version.
+"""
+
+import xml.etree.ElementTree as ET
+from docopt import docopt
+import os
+import re
+import sys
+
+class User:
+    def __init__(self, email, realname=None):
+        self.email = email
+        self.username = email.split("@")[0].replace("+", "_")
+        if not realname:
+            self._realname = self.username
+        else:
+            self._realname = realname
+
+    @property
+    def realname(self):
+        return self._realname
+
+    @realname.setter
+    def realname(self, realname):
+        if not realname:
+            return
+
+        self._realname = realname
+
+    def __repr__(self):
+        return "Email: %s Username: %s, realname: %s" % (self.email, self.username, self.realname)
+
+class Importer:
+    uname_cleaner = re.compile('[^a-zA-Z]')
+
+    def __init__(self):
+        self.root = None
+        self.users = {}
+        self.usernames = {}
+
+    def load(self, filename):
+        self.root = ET.parse(filename).getroot()
+
+    def add_user(self, user):
+        if user.email in self.users:
+            return
+
+        self.users[user.email] = user
+        cuser = self.usernames.get(user.username)
+
+        if cuser:
+            print("Already have a mail %s for %s (%s)" % (cuser.email, user.username,
+                                                          user.email))
+            user.username = self.uname_cleaner.sub("_", user.email)
+            self.users[user.email].username = self.uname_cleaner.sub("_", user.email)
+
+            cuser.username = self.uname_cleaner.sub("_", cuser.email)
+            self.users[cuser.email].username = self.uname_cleaner.sub("_", cuser.email)
+
+            print("==> %s" % user.username)
+
+        self.usernames[user.username] = user
+
+    def import_mails(self, script, adminame):
+        for bug in self.root.findall('bug'):
+            for cc in bug.findall("cc"):
+                if cc.text not in self.users:
+                    self.add_user(User(cc.text))
+
+            for attacher in bug.findall("attachment/attacher"):
+                self.add_user(User(attacher.text, attacher.attrib.get("name")))
+
+                self.users[attacher.text].realname = attacher.attrib.get("name")
+
+            for commenter in bug.findall("long_desc/who"):
+                self.add_user(User(commenter.text, commenter.attrib.get("name")))
+
+                self.users[commenter.text].realname = commenter.attrib.get("name")
+
+            reporter = bug.find("reporter")
+            self.add_user(User(reporter.text, reporter.attrib.get("name")))
+            self.users[reporter.text].realname = reporter.attrib.get("name")
+
+            assignee = bug.find("assigned_to")
+            if assignee.text not in self.users:
+                self.add_user(User(assignee.text, assignee.attrib.get("name")))
+            self.users[assignee.text].realname = assignee.attrib.get("name")
+
+            creator = bug.find("creator")
+            if creator and creator.text not in self.users:
+                self.add_user(User(creator.text, creator.attrib.get("name")))
+
+        for user in self.users.values():
+            command = '%s "%s" "%s" "%s" "%s" > tmplog 2>&1' % (script, user.username, user.email, user.realname, adminame)
+
+            if os.system(command) != 0:
+                print("Failure running: %s" % command)
+                sys.stdout.flush()
+                os.system("cat tmplog| grep EXCEPTION")
+
+
+def main(arguments):
+    filename = arguments['<bz.xml>']
+    importer = Importer()
+    importer.load(filename)
+    importer.import_mails(arguments['<add-user-php-script-path>'], arguments['<admin-username>'])
+
+if __name__ == '__main__':
+    arguments = docopt(__doc__, version='bzuserstophab 0.1')
+    main(arguments)

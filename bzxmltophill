@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+
+"""Converts Bugzilla XML files to something Phabricator's Phill may like.
+
+Usage:
+  bzxmltophill <bz.xml> [--base-url=url]
+
+Options:
+  --base-url=url  The default base URL for projects and tasks
+  -h --help       Show this screen.
+  --version       Show version.
+"""
+
+import xml.etree.ElementTree as ET
+from docopt import docopt
+from datetime import datetime
+import json
+import os
+import re
+
+try:
+    from config import project_naming
+except:
+    project_naming = {}
+
+class Converter:
+    def __init__(self):
+        self.root = None
+        self.projects = []
+        self.tasks = []
+        self.attachements = {}
+        self.base_url = 'https://bugzilla.gnome.org'
+
+    def set_base_url(self, url):
+        if url:
+            self.base_url = url
+
+    def url(self, i):
+        return self.base_url + "show_bug.cgi?id=" + i.findtext("bug_id")
+
+    def load(self, filename):
+        try:
+            os.mkdir("attachements/")
+        except FileExistsError:
+            pass
+        self.root = ET.parse(filename).getroot()
+
+    def convert(self):
+        self.projects_convert()
+        self.issues_convert()
+        r = {
+            'projects': self.projects,
+            'tasks': self.tasks
+        }
+        return r
+
+    def date_to_iso(self, datestr):
+        iso = datetime.strptime(datestr, '%Y-%m-%d %H:%M:%S +%f').isoformat()
+        return iso
+
+    def user_email(self, key):
+        return self.bytype['users'][key]['emailAddress']
+
+    def markup_parse(self, markup):
+        if not markup:
+            return None
+        # turn [text|link] to [[link|text]]
+        markup = re.sub(r'\[(.*)\|(.*)\]', r'[[\2|\1]]', markup)
+        # turn {{code}} to ##code##
+        markup = re.sub(r'{{(.*?)}}', r'##\1##', markup)
+        markup = markup.replace('{code}', '```')
+        return markup
+
+    def get_project_id(self, bug):
+        id_cleaner = re.compile('[^a-zA-Z]')
+        try:
+            return project_naming[bug.findtext("component")]
+        except KeyError:
+            return id_cleaner.sub("", bug.findtext("component")).upper()
+
+    def projects_convert(self):
+        all_projects = {}
+        for bug in self.root.findall('bug'):
+            project_id = self.get_project_id(bug)
+
+            project = all_projects.get(project_id)
+            if not project:
+                project = self.create_project(project_id, bug)
+                all_projects[project_id] = project
+
+    def create_project(self, pid, bug):
+        ret = {
+            'id': pid,
+            'name': bug.findtext("component").replace("-", " ").replace("_", " "),
+            'description': "Please add a project description",
+            'tracker': 'Bugzilla',
+            'url': "%s/buglist.cgi?component=%s&product=%s" % (self.base_url, bug.findtext("component"), bug.findtext("product")),
+            'creator': bug.findtext("assigned_to"),
+            'creationDate': self.date_to_iso(bug.findtext("creation_ts")),
+        }
+
+        members = []
+        for bug in self.root.findall('bug'):
+            members.append(bug.findtext("reporter"))
+            members.append(bug.findtext("assigned_to"))
+            for member in bug.findall("cc"):
+                members.append(member.text)
+
+        ret['members'] = list(set(members))
+        self.projects.append(ret)
+        return ret
+
+    def transaction_create(self, actor, date, kind, value=None, comment=None):
+        ret = {
+            'actor': actor,
+            'date': date,
+            'type': kind,
+        }
+        if value:
+            ret['value'] = value
+        if comment:
+            ret['comment'] = comment
+        return ret
+
+    def issues_convert(self):
+        for bug in self.root.findall("bug"):
+            self.issue_convert(bug)
+
+    def priority_parse(self, status):
+        m = {
+            "blocker": 100,
+            "critical": 80,
+            "major": 80,
+            "normal": 50,
+            "minor": 25,
+            "trivial": 25,
+            "enhancement": 0,
+        }
+
+        return m[status]
+
+    def status_parse(self, bug):
+        status = bug.findtext("bug_status")
+        resolution = bug.findtext("resolution")
+        if resolution:
+            status = resolution
+
+        m = {
+            "NEW": "open",
+            "REOPENED": "open",
+            "NEEDINFO": "open",
+            "ASSIGNED": "open",
+            "FIXED": "resolved",
+            "INCOMPLETE": "spite",
+            "NOTGNOME": "spite",
+            "NOTABUG": "spite",
+            "WONTFIX": "spite",
+            "INVALID": "spite",
+            "OBSOLETE": "spite",
+            "DUPLICATE": "duplicate",
+        }
+        return m[status]
+
+    def find_attachement(self, bug, id):
+        for attachment in bug.findall("attachment"):
+            if attachment.findtext("attachid") == id:
+                return attachment
+
+        return None
+
+    def get_attachement(self, attachment):
+        output = "attachements/%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename"))
+        if os.path.exists(output):
+            return output
+        os.system("wget %s/attachment.cgi?id=%s -O %s"
+                  % (self.base_url, attachment.findtext("attachid"),
+                     output))
+        return output
+
+    def convert_transactions(self, bug):
+        transactions = []
+
+        transactions.append(self.transaction_create(bug.findtext("assigned_to"),
+                                                    self.date_to_iso(bug.findtext("creation_ts")),
+                                                    "projects",
+                                                    {'=': [self.get_project_id(bug)]}))
+
+        for comment in bug.findall("long_desc")[1:]:
+            attachid = comment.find("attachid")
+            if attachid is not None:
+                attachid = attachid.text
+                attachment = self.find_attachement(bug, attachid)
+                if attachment.attrib["isobsolete"] == "1":
+                    continue
+                elif attachment.attrib["ispatch"] == "0":
+                    continue
+                elif attachment.findtext("gnome_attachment_status") == "committed":
+                    continue
+                elif bug.findtext("bug_status") == "RESOLVED":
+                    continue
+
+                value = {
+                    'author': attachment.findtext("attacher"),
+                    'data': self.get_attachement(attachment),
+                    'name': attachment.findtext("filename"),
+                    'mimetype': attachment.findtext("type"),
+                }
+
+                transaction = self.transaction_create(comment.findtext("who"),
+                                                      self.date_to_iso(comment.findtext("bug_when")),
+                                                      "attachment",
+                                                      value)
+                transactions.append(transaction)
+
+            transaction = self.transaction_create(comment.findtext("who"),
+                                                  self.date_to_iso(comment.findtext("bug_when")),
+                                                  "comment",
+                                                  comment.findtext("thetext"))
+            transactions.append(transaction)
+
+        transactions.append(self.transaction_create(bug.findtext("assigned_to"),
+                                                    self.date_to_iso(bug.findtext("creation_ts")),
+                                                    "priority",
+                                                    self.priority_parse(bug.findtext("bug_severity"))))
+
+        transactions.append(self.transaction_create(bug.findtext("assigned_to"),
+                                                    self.date_to_iso(bug.findtext("creation_ts")),
+                                                    "status",
+                                                    self.status_parse(bug)))
+
+        transactions.append(self.transaction_create(bug.findtext("assigned_to"),
+                                                    self.date_to_iso(bug.findtext("creation_ts")),
+                                                    "owner",
+                                                    bug.findtext("assigned_to")))
+
+        transactions.append(self.transaction_create(bug.findtext("assigned_to"),
+                                                    self.date_to_iso(bug.findtext("creation_ts")),
+                                                    "owner",
+                                                    bug.findtext("assigned_to")))
+
+        for cc in bug.findall("cc"):
+            transactions.append(self.transaction_create(bug.findtext("assigned_to"),
+                                                        self.date_to_iso(bug.findtext("creation_ts")),
+                                                        "subscribers",
+                                                        {"+": [cc.text]}))
+
+        return transactions
+
+    def issue_convert(self, i):
+        reporter = i.findtext("reporter")
+        date = self.date_to_iso(i.findtext("creation_ts"))
+        ret = {
+            'id': i.findtext("bug_id"),
+            'url': self.url(i),
+            'title': i.findtext("short_desc"),
+            'creationDate': date,
+            'creator': reporter,
+            'description': i.find("long_desc").findtext("thetext"),
+            'transactions': self.convert_transactions(i)
+        }
+        self.tasks.append(ret)
+
+def main(arguments):
+    filename = arguments['<bz.xml>']
+    converter = Converter()
+    if '--base-url' in arguments:
+        converter.set_base_url(arguments['--base-url'])
+    converter.load(filename)
+    data = converter.convert()
+    print(json.dumps(data, sort_keys=True, indent=4))
+
+if __name__ == '__main__':
+    arguments = docopt(__doc__, version='bztophill 0.1')
+    main(arguments)
