@@ -19,9 +19,14 @@ import os
 import re
 
 try:
-    from config import project_naming
+    from config import project_ids
 except:
-    project_naming = {}
+    project_ids = {}
+
+try:
+    from config import project_names
+except:
+    project_ids = {}
 
 class Converter:
     def __init__(self):
@@ -70,27 +75,43 @@ class Converter:
         markup = markup.replace('{code}', '```')
         return markup
 
-    def get_project_id(self, bug):
+    def get_project_ids(self, bug):
         id_cleaner = re.compile('[^a-zA-Z]')
+        product_id = project_ids.get(bug.findtext("product"),
+                                     id_cleaner.sub("", bug.findtext("product")).upper())
+
+        product_name = self.clean_project_name(bug.findtext("product"))
+
+        component_id = project_ids.get(bug.findtext("component"),
+                                       id_cleaner.sub("", bug.findtext("component")).upper())
+        component_name = self.clean_project_name(bug.findtext("component"))
+
+        return [(product_id, product_name),
+                (component_id, component_name)]
+
+    def clean_project_name(self, name):
         try:
-            return project_naming[bug.findtext("component")]
+            return project_names[name]
         except KeyError:
-            return id_cleaner.sub("", bug.findtext("component")).upper()
+            return name.replace("-", " ").replace("_", " ")
 
     def projects_convert(self):
         all_projects = {}
         for bug in self.root.findall('bug'):
-            project_id = self.get_project_id(bug)
 
-            project = all_projects.get(project_id)
-            if not project:
-                project = self.create_project(project_id, bug)
-                all_projects[project_id] = project
+            project_ids = self.get_project_ids(bug)
+            for project_id, project_name in project_ids:
+                project = all_projects.get(project_id)
+                if not project:
+                    project = self.create_project(project_id,
+                                                  project_name,
+                                                  bug)
+                    all_projects[project_id] = project
 
-    def create_project(self, pid, bug):
+    def create_project(self, pid, name, bug):
         ret = {
             'id': pid,
-            'name': bug.findtext("component").replace("-", " ").replace("_", " "),
+            'name': name,
             'description': "Please add a project description",
             'tracker': 'Bugzilla',
             'url': "%s/buglist.cgi?component=%s&product=%s" % (self.base_url, bug.findtext("component"), bug.findtext("product")),
@@ -182,7 +203,7 @@ class Converter:
         transactions.append(self.transaction_create(bug.findtext("assigned_to"),
                                                     self.date_to_iso(bug.findtext("creation_ts")),
                                                     "projects",
-                                                    {'=': [self.get_project_id(bug)]}))
+                                                    {'=': [id_name[0] for id_name in self.get_project_ids(bug)]}))
 
         for comment in bug.findall("long_desc")[1:]:
             attachid = comment.find("attachid")
