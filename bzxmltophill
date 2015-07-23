@@ -195,6 +195,9 @@ class Converter:
                     'data': self.get_attachement(attachment),
                     'name': attachment.findtext("filename"),
                     'mimetype': attachment.findtext("type"),
+                    'ispatch': attachment.attrib["ispatch"],
+                    'isobsolete': attachment.attrib["isobsolete"],
+                    'patchstatus': attachment.findtext("gnome_attachment_status"),
                 }
 
                 transaction = self.transaction_create(comment.findtext("who"),
