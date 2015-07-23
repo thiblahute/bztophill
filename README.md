@@ -25,10 +25,18 @@ for a product/component
 
 # tell bzxmltophill the base URL of the Bugzilla instance, so that it can link back to the original issues.
 
-./jinson bugs.xml --base-url https://jira.example.org/browse > tasks.json
+  $ ./bzxmltophill bugs.xml --base-url https://jira.example.org/browse > tasks.json
 
 # ta-dah! fill Maniphest with useless chatter and let's go shopping
-phill tasks.json -v 2
+  $ phill tasks.json -v 2
+
+
+# In one line:
+  $ ./bzuserstophab bugs.xml /srv/http/phabricator/scripts/user/add_user.php phab_admin_username  && \
+    ./bzxmltophill bugs.xml > tasks.json && \
+    /srv/http/phabricator/scripts/phill/phill.php --input tasks.json -v 2
+
+
 ```
 
 Those scripts are in big part taken from [Jinson & Johill](https://github.com/em-/jinson-and-johill/)
