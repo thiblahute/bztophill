@@ -28,7 +28,6 @@ class Converter:
         self.root = None
         self.projects = []
         self.tasks = []
-        self.attachements = {}
         self.base_url = 'https://bugzilla.gnome.org'
 
     def set_base_url(self, url):
@@ -190,14 +189,6 @@ class Converter:
             if attachid is not None:
                 attachid = attachid.text
                 attachment = self.find_attachement(bug, attachid)
-                if attachment.attrib["isobsolete"] == "1":
-                    continue
-                elif attachment.attrib["ispatch"] == "0":
-                    continue
-                elif attachment.findtext("gnome_attachment_status") == "committed":
-                    continue
-                elif bug.findtext("bug_status") == "RESOLVED":
-                    continue
 
                 value = {
                     'author': attachment.findtext("attacher"),
@@ -215,7 +206,7 @@ class Converter:
             transaction = self.transaction_create(comment.findtext("who"),
                                                   self.date_to_iso(comment.findtext("bug_when")),
                                                   "comment",
-                                                  comment.findtext("thetext"))
+                                                  comment=comment.findtext("thetext"))
             transactions.append(transaction)
 
         transactions.append(self.transaction_create(bug.findtext("assigned_to"),
