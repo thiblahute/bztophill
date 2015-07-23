@@ -171,7 +171,7 @@ class Converter:
         output = "attachements/%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename"))
         if os.path.exists(output):
             return output
-        os.system("wget %s/attachment.cgi?id=%s -O %s"
+        os.system("wget '%s/attachment.cgi?id=%s' -O '%s'"
                   % (self.base_url, attachment.findtext("attachid"),
                      output))
         return output
