@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+
+"""Download backup XML from bugzilla
+
+Usage:
+  downloadbugs <product/component> <outfile> [--browser=browser -od]
+
+Options:
+  --browser=browser Name of the browser where to find cookie to connect to bugzilla (default: firefox3)
+  -od=outfiles_dir  Were to put generated/downloaded files
+
+  -h --help       Show this screen.
+  --version       Show version.
+"""
+import os
+import re
+import time
+import sys
+import shutil
+
+from urllib.parse import urlparse
+from docopt import docopt
+from configparser import RawConfigParser
+import xml.etree.ElementTree as ET
+
+try:
+    from sqlite3 import dbapi2 as sqlite
+except ImportError:
+    from pysqlite2 import dbapi2 as sqlite
+
+DEFAULT_SERVER = 'https://bugzilla.gnome.org'
+
+# All cookie retrieval related code was taken from git-bz: http://git.fishsoup.net/cgit/git-bz/
+class CookieError(Exception):
+    pass
+
+def die(message):
+    print(message)
+    sys.exit(1)
+
+
+def do_get_cookies_from_sqlite(host, cookies_sqlite, browser, query, chromium_time):
+    result = {}
+    # We use a timeout of 0 since we expect to hit the browser holding
+    # the lock often and we need to fall back to making a copy without a delay
+    connection = sqlite.connect(cookies_sqlite, timeout=0)
+
+    try:
+        cursor = connection.cursor()
+        cursor.execute(query, {'host': host})
+
+        now = time.time()
+        for name, value, path, expiry in cursor.fetchall():
+            # Excessive caution: toss out values that need to be quoted in a cookie header
+            expiry = float(expiry)
+            if chromium_time:
+                # Time stored in microseconds since epoch
+                expiry /= 1000000.
+                # Old chromium versions used to use the Unix epoch, but newer versions
+                # use the Windows epoch of January 1, 1601. Convert the latter to Unix epoch
+                if expiry > 11644473600:
+                    expiry -= 11644473600
+            if float(expiry) > now and not re.search(r'[()<>@,;:\\"/\[\]?={} \t]', value):
+                result[name] = value
+
+        return result
+    finally:
+        connection.close()
+
+# Firefox 3.5 keeps the cookies database permamently locked; as a workaround
+# hack, we make a copy, read from that, then delete the copy. Of course,
+# we may hit an inconsistent state of the database
+def get_cookies_from_sqlite_with_copy(host, cookies_sqlite, browser, *args, **kwargs):
+    db_copy = cookies_sqlite + ".git-bz-temp"
+    shutil.copyfile(cookies_sqlite, db_copy)
+    try:
+        return do_get_cookies_from_sqlite(host, db_copy, browser, *args, **kwargs)
+    except sqlite.OperationalError as e:
+        raise CookieError("Cookie database was locked; temporary copy didn't work")
+    finally:
+        os.remove(db_copy)
+
+def get_cookies_from_sqlite(host, cookies_sqlite, browser, query, chromium_time=False):
+    try:
+        result = do_get_cookies_from_sqlite(host, cookies_sqlite, browser, query,
+                                            chromium_time=chromium_time)
+    except sqlite.OperationalError as e:
+        if "database is locked" in str(e):
+            # Try making a temporary copy
+            result = get_cookies_from_sqlite_with_copy(host, cookies_sqlite, browser, query,
+                                                       chromium_time=chromium_time)
+        else:
+            raise
+
+    if not ('Bugzilla_login' in result and 'Bugzilla_logincookie' in result):
+        raise CookieError("You don't appear to be signed into %s; please log in with %s" % (host,
+                                                                                            browser))
+
+    return result
+
+def get_cookies_from_sqlite_xulrunner(host, cookies_sqlite, name):
+    return get_cookies_from_sqlite(host, cookies_sqlite, name,
+                                   "select name,value,path,expiry from moz_cookies where host in (:host, '.'||:host)")
+
+def get_bugzilla_cookies_ff3(host):
+    if os.uname()[0] == 'Darwin':
+        profiles_dir = os.path.expanduser('~/Library/Application Support/Firefox')
+    else:
+        profiles_dir = os.path.expanduser('~/.mozilla/firefox')
+    profile_path = None
+
+    cp = RawConfigParser()
+    cp.read(os.path.join(profiles_dir, "profiles.ini"))
+    for section in cp.sections():
+        if not cp.has_option(section, "Path"):
+            continue
+
+        if (not profile_path or (cp.has_option(section, "Default") and cp.get(section, "Default").strip() == "1")):
+            profile_path = os.path.join(profiles_dir, cp.get(section, "Path").strip())
+
+    if not profile_path:
+        raise CookieError("Cannot find default Firefox profile")
+
+    cookies_sqlite = os.path.join(profile_path, "cookies.sqlite")
+    if not os.path.exists(cookies_sqlite):
+        raise CookieError("%s doesn't exist." % cookies_sqlite)
+
+    return get_cookies_from_sqlite_xulrunner(host, cookies_sqlite, "Firefox")
+
+def get_bugzilla_cookies_galeon(host):
+    cookies_sqlite = os.path.expanduser('~/.galeon/mozilla/galeon/cookies.sqlite')
+    if not os.path.exists(cookies_sqlite):
+        raise CookieError("%s doesn't exist." % cookies_sqlite)
+
+    return get_cookies_from_sqlite_xulrunner(host, cookies_sqlite, "Galeon")
+
+def get_bugzilla_cookies_epy(host):
+    # epiphany-webkit migrated the cookie db to a different location, but the
+    # format is the same
+    profile_dir = os.path.expanduser('~/.config/epiphany')
+    cookies_sqlite = os.path.join(profile_dir, "cookies.sqlite")
+    if not os.path.exists(cookies_sqlite):
+        # try pre-GNOME-3.6 location
+        profile_dir = os.path.expanduser('~/.gnome2/epiphany')
+        cookies_sqlite = os.path.join(profile_dir, "cookies.sqlite")
+        if not os.path.exists(cookies_sqlite):
+            # try the old location
+            cookies_sqlite = os.path.join(profile_dir, "mozilla/epiphany/cookies.sqlite")
+
+    if not os.path.exists(cookies_sqlite):
+        raise CookieError("%s doesn't exist" % cookies_sqlite)
+
+    return get_cookies_from_sqlite_xulrunner(host, cookies_sqlite, "Epiphany")
+
+# Shared for Chromium and Google Chrome
+def get_bugzilla_cookies_chr(host, browser, config_dir):
+    config_dir = os.path.expanduser(config_dir)
+    cookies_sqlite = os.path.join(config_dir, "Cookies")
+    if not os.path.exists(cookies_sqlite):
+        raise CookieError("%s doesn't exist" % cookies_sqlite)
+    return get_cookies_from_sqlite(host, cookies_sqlite, browser,
+                                   "select name,value,path,expires_utc from cookies where host_key in (:host, '.'||:host)",
+                                   chromium_time=True)
+
+def get_bugzilla_cookies_chromium(host):
+    if os.uname()[0] == 'Darwin':
+        config_dir = '~/Library/Application Support/Chromium/Default'
+    else:
+        config_dir = '~/.config/chromium/Default'
+    return get_bugzilla_cookies_chr(host,
+                                    "Chromium",
+                                    config_dir)
+
+def get_bugzilla_cookies_google_chrome(host):
+    if os.uname()[0] == 'Darwin':
+        config_dir = '~/Library/Application Support/Google/Chrome/Default'
+    else:
+        config_dir = '~/.config/google-chrome/Default'
+    return get_bugzilla_cookies_chr(host,
+                                    "Google Chrome",
+                                    config_dir)
+
+browsers = {'firefox3': get_bugzilla_cookies_ff3,
+            'epiphany': get_bugzilla_cookies_epy,
+            'galeon': get_bugzilla_cookies_galeon,
+            'chromium': get_bugzilla_cookies_chromium,
+            'google-chrome': get_bugzilla_cookies_google_chrome}
+
+def browser_list():
+    return ", ".join(sorted(browsers.keys()))
+
+def get_bugzilla_cookies(host, browser=None):
+    if not browser:
+        browser = "firefox3"
+
+    if browser in browsers:
+        do_get_cookies = browsers[browser]
+    else:
+        die('Unsupported browser %s (we only support %s)' % (browser, browser_list()))
+
+    try:
+        return do_get_cookies(host)
+    except CookieError as e:
+        die("""Error %s getting login cookie from browser: Configured browser: %s Possible browsers: %s""" %
+            (str(e), browser, browser_list()))
+
+def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
+    # Not that we do not use the 'standard' xmlrpc protocol as the
+    # generated XML is more complex to parse.
+    # And we do not use python-bugzilla to avoid making thousands
+    # of queries on the server which would take much longer
+
+    query_url = "%s/buglist.cgi?limit=0&product=%s&ctype=rdf" % (base_url, product)
+    if component:
+        query_url += "&component=%s" % component
+
+    fname = re.compile('[^a-zA-Z]').sub("", product + component)
+    rdf_path = os.path.join(outfiles_dir, "%s.rdf" % fname)
+
+    if os.system("wget '%s' -O %s" % (query_url, rdf_path)) != 0:
+        print("ERROR: Could not get list of bugs for %s/%s" % (product, component))
+
+        return None
+
+    rdf_root = ET.parse(rdf_path).getroot()
+
+    # Work around ElementTree not able to handle namespaces properly
+    bug_ids_path = "bz:result/bz:bugs/r:Seq/r:li/bz:bug/bz:id".replace(
+        "bz:", "{http://www.bugzilla.org/rdf#}").replace(
+        "r:", "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}")
+
+    bug_ids = [bugid.text for bugid in rdf_root.findall(bug_ids_path)]
+
+    # Use curl to make a simple POST query on the bugzilla server
+    cookie_str = "-H 'Cookie: Bugzilla_login=%(Bugzilla_login)s; Bugzilla_logincookie=%(Bugzilla_logincookie)s;' " % cookies
+    curl_command = "curl 'https://bugzilla.gnome.org/show_bug.cgi' --compressed %s " \
+        "-H 'Connection: keep-alive' " \
+        "--data 'ctype=xml&id=%s&excludefield=attachmentdata' > '%s'" % (cookie_str,
+                                                                       '&id='.join(bug_ids), outfile)
+
+    if os.system(curl_command) == 0:
+        return True
+    else:
+        print("ERROR: Could not get XML for %s/%s" % (product, component))
+        return False
+
+
+def main(arguments):
+    product_component = arguments["<product/component>"].split("/")
+
+    product = product_component[0]
+    if len(product_component) == 2:
+        component = product_component[1]
+    elif len(product_component) == 1:
+        component = None
+    else:
+        assert("Could not find a product/component information from %s"
+               % arguments["<product/component>"])
+
+    outfiles_dir = arguments.get('-od', "outfiles")
+    try:
+        os.mkdir(outfiles_dir)
+    except FileExistsError:
+        pass
+
+    try:
+        os.mkdir(outfiles_dir)
+    except FileExistsError:
+        pass
+
+    url = arguments.get('--base-url', DEFAULT_SERVER)
+    cookies = get_bugzilla_cookies(urlparse(url).netloc, arguments.get("--browser"))
+    return download_xml(url, cookies, product, component,
+                        arguments.get('<outfile>'), outfiles_dir)
+
+
+if __name__ == '__main__':
+    arguments = docopt(__doc__, version='bztophill 0.1')
+    main(arguments)
