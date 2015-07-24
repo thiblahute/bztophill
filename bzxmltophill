@@ -3,20 +3,23 @@
 """Converts Bugzilla XML files to something Phabricator's Phill may like.
 
 Usage:
-  bzxmltophill <bz.xml> [--base-url=url]
+  bzxmltophill <bz.xml> <outfile> [--base-url=url -od]
 
 Options:
   --base-url=url  The default base URL for projects and tasks
+  -od=outfiles_dir Were to put generated/downloaded files
   -h --help       Show this screen.
   --version       Show version.
 """
 
-import xml.etree.ElementTree as ET
 from docopt import docopt
 from datetime import datetime
+import xml.etree.ElementTree as ET
 import json
 import os
 import re
+
+DEFAULT_SERVER = 'https://bugzilla.gnome.org'
 
 try:
     from config import project_ids
@@ -33,20 +36,21 @@ class Converter:
         self.root = None
         self.projects = []
         self.tasks = []
-        self.base_url = 'https://bugzilla.gnome.org'
+        self.base_url = DEFAULT_SERVER
 
     def set_base_url(self, url):
         if url:
             self.base_url = url
 
     def url(self, i):
-        return self.base_url + "show_bug.cgi?id=" + i.findtext("bug_id")
+        return self.base_url + "/show_bug.cgi?id=" + i.findtext("bug_id")
 
     def load(self, filename):
         try:
             os.mkdir("attachements/")
         except FileExistsError:
             pass
+
         self.root = ET.parse(filename).getroot()
 
     def convert(self):
@@ -178,6 +182,7 @@ class Converter:
             "INVALID": "spite",
             "OBSOLETE": "spite",
             "DUPLICATE": "duplicate",
+            "UNCONFIRMED": "open",
         }
         return m[status]
 
@@ -275,14 +280,24 @@ class Converter:
         }
         self.tasks.append(ret)
 
+
 def main(arguments):
     filename = arguments['<bz.xml>']
+    outfiles_dir = arguments.get('-od', "outfiles")
+
+    try:
+        os.mkdir(outfiles_dir)
+    except FileExistsError:
+        pass
+
     converter = Converter()
     if '--base-url' in arguments:
         converter.set_base_url(arguments['--base-url'])
+
     converter.load(filename)
     data = converter.convert()
-    print(json.dumps(data, sort_keys=True, indent=4))
+
+    open(arguments["<outfile>"], 'w').write(json.dumps(data, sort_keys=True, indent=4))
 
 if __name__ == '__main__':
     arguments = docopt(__doc__, version='bztophill 0.1')

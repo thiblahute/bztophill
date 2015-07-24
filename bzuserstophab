@@ -10,6 +10,7 @@ Usage:
   bzuserstophab <bz.xml> <add-user-php-script-path> <admin-username>
 
 Options:
+  -o=outfiles_dir       Were to put generated/downloaded files
   -h --help             Show this screen.
   --version             Show version.
 """
@@ -46,10 +47,11 @@ class User:
 class Importer:
     uname_cleaner = re.compile('[^a-zA-Z]')
 
-    def __init__(self):
+    def __init__(self, outfiles_dir):
         self.root = None
         self.users = {}
         self.usernames = {}
+        self.outfiles_dir = outfiles_dir
 
     def load(self, filename):
         self.root = ET.parse(filename).getroot()
@@ -104,17 +106,24 @@ class Importer:
                 self.add_user(User(creator.text, creator.attrib.get("name")))
 
         for user in self.users.values():
-            command = '%s "%s" "%s" "%s" "%s" > tmplog 2>&1' % (script, user.username, user.email, user.realname, adminame)
+            log = os.path.join("outfiles", "add_%s" % user.email)
+            command = '%s "%s" "%s" "%s" "%s" > %s 2>&1' % (script, user.username, user.email, user.realname, adminame, log)
 
             if os.system(command) != 0:
                 print("Failure running: %s" % command)
                 sys.stdout.flush()
-                os.system("cat tmplog| grep EXCEPTION")
+                os.system("cat %s| grep EXCEPTION" % log)
 
 
 def main(arguments):
     filename = arguments['<bz.xml>']
-    importer = Importer()
+    outfiles_dir = arguments.get('-o', "outfiles")
+    try:
+        os.mkdir(outfiles_dir)
+    except FileExistsError:
+        pass
+
+    importer = Importer(outfiles_dir)
     importer.load(filename)
     importer.import_mails(arguments['<add-user-php-script-path>'], arguments['<admin-username>'])
 
