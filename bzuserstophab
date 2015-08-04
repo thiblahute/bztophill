@@ -109,10 +109,22 @@ class Importer:
             log = os.path.join("outfiles", "add_%s" % user.email)
             command = '%s "%s" "%s" "%s" "%s" > %s 2>&1' % (script, user.username, user.email, user.realname, adminame, log)
 
-            if os.system(command) != 0:
+            i = 0
+            while os.system(command) != 0:
+                if os.system("cat %s| grep 'There is already a user with the username'" % log) == 0:
+                    uname = self.uname_cleaner.sub("_", user.email)
+                    if i > 0:
+                        uname += "_%s" % i
+
+                    command = '%s "%s" "%s" "%s" "%s" > %s 2>&1' % (script, uname,
+                                                                    user.email, user.realname, adminame, log)
+                    i += 1
+                    continue
+
                 print("Failure running: %s" % command)
                 sys.stdout.flush()
                 os.system("cat %s| grep EXCEPTION" % log)
+                break
 
 
 def main(arguments):
