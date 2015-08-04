@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 import json
 import os
 import re
+import base64
 
 DEFAULT_SERVER = 'https://bugzilla.gnome.org'
 
@@ -149,6 +150,12 @@ class Converter:
     def issues_convert(self):
         for bug in self.root.findall("bug"):
             self.issue_convert(bug)
+        if len(self.tasks) == 10000:
+            print("Exactly 10 000 tasks, *most* probably due to reaching"
+                  " the hard limit of XML downloading from the bugzilla"
+                  " server -- you should download the database in smaller"
+                  " pieces")
+            exit(1)
 
     def priority_parse(self, status):
         m = {
@@ -197,9 +204,21 @@ class Converter:
         output = "attachements/%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename"))
         if os.path.exists(output):
             return output
+
+        data = attachment.findtext("data")
+        if data:
+            data = base64.b64decode(data)
+            open(output, "wb").write(data)
+
+            return output
+
+        return self.download_attachement(attachment)
+
+    def download_attachement(self, attachment):
+        output = "attachements/%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename"))
         os.system("wget '%s/attachment.cgi?id=%s' -O '%s'"
-                  % (self.base_url, attachment.findtext("attachid"),
-                     output))
+                  % (self.base_url, attachment.findtext("attachid"), output))
+
         return output
 
     def convert_transactions(self, bug):
