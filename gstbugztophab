@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+
+MODULES = ["gstreamer (core)",
+           "gst-plugins-base",
+           "gst-plugins-good",
+           "gst-plugins-ugly",
+           "gst-plugins-bad",
+           "gst-libav",
+           "gst-devtools",
+           "gst-editing-services"]
+
+if len(sys.argv) > 1:
+    MODULES = sys.argv[1:]
+
+for m in MODULES:
+    print("Downloading XML file for %s" % m)
+
+    if os.system("./downloadbzbugs 'GStreamer/%s' 'outfiles/%s.xml'" % (m, m)) != 0:
+        print("%s failed downloading" % m)
+        exit(1)
+
+    print("Adding users for %s" % m)
+    if os.system("./bzuserstophab 'outfiles/%s.xml' bugzilla_import" % (m)) != 0:
+        print("%s failed adding users" % m)
+        exit(1)
+
+    print("Generating JSON for '%s'" % m)
+    if os.system("./bzxmltophill 'outfiles/%s.xml'" % (m)) != 0:
+        print("%s failed converting to json" % m)
+        exit(1)
+
+    try:
+        os.mkdir(os.path.join("outfiles", m))
+    except:
+        pass
+
+    print("Importing bugs %s" % m)
+    if os.system(os.path.join(os.environ["PHABRICATOR_ROOT"],
+                              "scripts/phill/phill.php") + " --input 'outfiles/%s.json' -v 2 > 'outfiles/%s/phill_%s.logs' 2>&1" % (m, m, m)) != 0:
+        print("%s failed to import bugs into phabricator" % m)
+        exit(1)
