@@ -18,7 +18,6 @@ Options:
 import xml.etree.ElementTree as ET
 from docopt import docopt
 import os
-import re
 import sys
 
 class User:
@@ -45,7 +44,6 @@ class User:
         return "Email: %s Username: %s, realname: %s" % (self.email, self.username, self.realname)
 
 class Importer:
-    uname_cleaner = re.compile('[^a-zA-Z]')
 
     def __init__(self, outfiles_dir):
         self.root = None
@@ -66,11 +64,12 @@ class Importer:
         if cuser:
             print("Already have a mail %s for %s (%s)" % (cuser.email, user.username,
                                                           user.email))
-            user.username = self.uname_cleaner.sub("_", user.email)
-            self.users[user.email].username = self.uname_cleaner.sub("_", user.email)
 
-            cuser.username = self.uname_cleaner.sub("_", cuser.email)
-            self.users[cuser.email].username = self.uname_cleaner.sub("_", cuser.email)
+            user.username = ''.join(e for e in user.email if e.isalnum())
+            self.users[user.email].username = ''.join(e for e in user.email if e.isalnum())
+
+            cuser.username = ''.join(e for e in cuser.email if e.isalnum())
+            self.users[cuser.email].username = ''.join(e for e in cuser.email if e.isalnum())
 
             print("==> %s" % user.username)
 
@@ -112,7 +111,7 @@ class Importer:
             i = 0
             while os.system(command) != 0:
                 if os.system("cat %s| grep 'There is already a user with the username'" % log) == 0:
-                    uname = self.uname_cleaner.sub("_", user.email)
+                    uname = ''.join(e for e in user.email if e.isalnum())
                     if i > 0:
                         uname += "_%s" % i
 
