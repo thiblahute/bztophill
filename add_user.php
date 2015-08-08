@@ -30,10 +30,13 @@ $existing_user = id(new PhabricatorUser())->loadOneWhere(
   'username = %s',
   $username);
 if ($existing_user) {
-  throw new Exception(
-    pht(
-      "There is already a user with the username '%s'!",
-      $username));
+  $username = str_replace("@","_at_",$email);
+
+  $existing_user = id(new PhabricatorUser())->loadOneWhere('username = %s', $username);
+
+  if ($existing_user) {
+      throw new Exception( pht( "There is already a user with the username '%s'!", $username));
+  }
 }
 
 $existing_email = id(new PhabricatorUserEmail())->loadOneWhere(
