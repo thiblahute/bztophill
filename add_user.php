@@ -62,8 +62,6 @@ id(new PhabricatorUserEditor())
   ->setActor($admin)
   ->createNewUser($user, $email_object);
 
-$user->sendWelcomeEmail($admin);
-
 echo pht(
   "Created user '%s' (realname='%s', email='%s').\n",
   $username,
