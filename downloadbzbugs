@@ -17,6 +17,7 @@ import re
 import time
 import sys
 import shutil
+import tempfile
 
 from urllib.parse import urlparse
 from docopt import docopt
@@ -219,7 +220,7 @@ def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
     else:
         fname = re.compile('[^a-zA-Z]').sub("", product)
 
-    rdf_path = os.path.join(outfiles_dir, "%s.rdf" % fname)
+    rdf_path = os.path.join(tempfile.mkdtemp(), "%s.rdf" % fname)
 
     if os.system("wget '%s' -O %s" % (query_url, rdf_path)) != 0:
         print("ERROR: Could not get list of bugs for %s/%s" % (product, component))

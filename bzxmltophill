@@ -3,7 +3,7 @@
 """Converts Bugzilla XML files to something Phabricator's Phill may like.
 
 Usage:
-  bzxmltophill <bz.xml> <outfile> [--base-url=url -od]
+  bzxmltophill <bz.xml> [--base-url=url -od]
 
 Options:
   --base-url=url  The default base URL for projects and tasks
@@ -33,11 +33,13 @@ except:
     project_ids = {}
 
 class Converter:
-    def __init__(self):
+    def __init__(self, outfiles_dir):
         self.root = None
         self.projects = []
         self.tasks = []
         self.base_url = DEFAULT_SERVER
+        self.outfiles_dir = outfiles_dir
+        self.attachments_dir = os.path.join(outfiles_dir, "attachements")
 
     def set_base_url(self, url):
         if url:
@@ -48,7 +50,7 @@ class Converter:
 
     def load(self, filename):
         try:
-            os.mkdir("attachements/")
+            os.mkdir(self.attachments_dir)
         except FileExistsError:
             pass
 
@@ -201,25 +203,27 @@ class Converter:
         return None
 
     def get_attachement(self, attachment):
-        output = "attachements/%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename"))
+        fpath = os.path.join("attachements", "%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename")))
+        output = os.path.join(self.attachments_dir, "%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename")))
         if os.path.exists(output):
-            return output
+            return fpath
 
         data = attachment.findtext("data")
         if data:
             data = base64.b64decode(data)
             open(output, "wb").write(data)
 
-            return output
+            return fpath
 
         return self.download_attachement(attachment)
 
     def download_attachement(self, attachment):
-        output = "attachements/%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename"))
+        fpath = os.path.join("attachements", "%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename")))
+        output = os.path.join(self.outfiles_dir, "%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename")))
         os.system("wget '%s/attachment.cgi?id=%s' -O '%s'"
                   % (self.base_url, attachment.findtext("attachid"), output))
 
-        return output
+        return fpath
 
     def convert_transactions(self, bug):
         transactions = []
@@ -309,14 +313,15 @@ def main(arguments):
     except FileExistsError:
         pass
 
-    converter = Converter()
+    outfile = os.path.join(outfiles_dir, os.path.splitext(os.path.basename(filename))[0]) + '.json'
+    converter = Converter(outfiles_dir)
     if '--base-url' in arguments:
         converter.set_base_url(arguments['--base-url'])
 
     converter.load(filename)
     data = converter.convert()
 
-    open(arguments["<outfile>"], 'w').write(json.dumps(data, sort_keys=True, indent=4))
+    open(outfile, 'w').write(json.dumps(data, sort_keys=True, indent=4))
 
 if __name__ == '__main__':
     arguments = docopt(__doc__, version='bztophill 0.1')
