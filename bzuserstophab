@@ -104,15 +104,15 @@ class Importer:
         except FileExistsError:
             pass
 
-        failures = open("%s/%s_add_users.failure" % (self.outfiles_dir, os.path.splitext(self.file)[0]), "w", encoding="utf-8-sig")
+        failures = open("%s/%s_add_users.failure" % (self.outfiles_dir, os.path.splitext(os.path.basename(self.file))[0]), "w", encoding="utf-8-sig")
         imported_user_fpath = os.path.join(self.outfiles_dir, "imported_users.json")
         try:
-            success_file = open(imported_user_fpath, "r")
+            print("Loading %s" % imported_user_fpath)
+            success_file = open(imported_user_fpath, "r", encoding='utf-8-sig')
             success = json.load(success_file)
             success_file.close()
-        except FileNotFoundError:
-            success = {}
-        except ValueError:
+        except FileNotFoundError as e:
+            print("%s" % e)
             success = {}
 
         for user in self.users.values():
