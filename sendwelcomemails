@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""Import all users defined in a Bugzilla XML file in phabricator
+with the Phabricator add_user.php script.
+
+This script should be used before using Phabricator's Phill unless
+you are sure all users already exist.
+
+Usage:
+  sendmails <json_file> [-o=outdir -r=phabricator_rootdir]
+
+Options:
+  -o=outfiles_dir              Were to put generated/downloaded files
+  -r=phabricator_rootdir       Were to put generated/downloaded files
+  -h --help                    Show this screen.
+  --version                    Show version.
+"""
+try:
+    from config import people_who_do_not_want_an_account
+except:
+    people_who_do_not_want_an_account = {}
+
+from docopt import docopt
+import os
+import json
+
+class Sender:
+    def __init__(self, outfiles_dir, phab_root):
+        self.outfiles_dir = outfiles_dir
+        self.phab_root = phab_root
+
+    def send_mails(self, filename):
+        try:
+            print("Sending mails from %s" % filename)
+            success_file = open(filename, "r", encoding='utf-8-sig')
+            users = json.load(success_file)
+            success_file.close()
+        except FileNotFoundError as e:
+            print("%s" % e)
+            users = {}
+            exit(1)
+
+        logdir = os.path.join(self.outfiles_dir, "send_welcome_mails_logs")
+        try:
+            os.mkdir(logdir)
+        except FileExistsError:
+            pass
+
+        for mail in users.keys():
+            if people_who_do_not_want_an_account.get(mail):
+                print("%s does not want an account" % mail)
+                continue
+
+            if not users[mail].get("sent"):
+                if os.system("./send_welcome_mail.php '%s' > '%s' 2>&1" % (mail,
+                             os.path.join(logdir, "%s.log" % mail))) == 0:
+                    users[mail]["sent"] = True
+                else:
+                    print("FAILLED sending mail to %s" % mail)
+
+        open(filename, "wt", encoding="utf-8-sig").write(json.dumps(users, sort_keys=True, indent=4, ensure_ascii=False))
+
+def main(arguments):
+    filename = arguments['<json_file>']
+    outfiles_dir = arguments.get('-o', "outfiles")
+    if not outfiles_dir:
+        outfiles_dir = "outfiles"
+
+    phab_root = arguments.get('-r', None)
+    try:
+        os.mkdir(outfiles_dir)
+    except FileExistsError:
+        pass
+
+    if not os.environ.get("PHABRICATOR_ROOT"):
+        if not phab_root:
+            raise RuntimeError("You need to set phabricator root directory environment variable to run this script"
+                               " (either through the PHABRICATOR_ROOT environment variable or the -r=phabricator_rootdir option).")
+        os.environ["PHABRICATOR_ROOT"] = phab_root
+
+    sender = Sender(outfiles_dir, phab_root)
+    sender.send_mails(filename)
+
+if __name__ == '__main__':
+    arguments = docopt(__doc__, version='sendwelcomemails 0.1')
+    main(arguments)
