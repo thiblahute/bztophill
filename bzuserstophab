@@ -112,7 +112,7 @@ class Importer:
             success = json.load(success_file)
             success_file.close()
         except FileNotFoundError as e:
-            print("%s" % e)
+            print("No imported users yes: %s" % e)
             success = {}
 
         for user in self.users.values():
