@@ -3,22 +3,29 @@
 import os
 import sys
 
-MODULES = ["gstreamer (core)",
-           "gst-plugins-base",
-           "gst-plugins-good",
-           "gst-plugins-ugly",
-           "gst-plugins-bad",
-           "gst-libav",
-           "gst-devtools",
-           "gst-editing-services"]
+MODULES = [("pitivi", None),
+           ("GStreamer", "gstreamer (core)"),
+           ("GStreamer", "gst-plugins-base"),
+           ("GStreamer", "gst-plugins-good"),
+           ("GStreamer", "gst-plugins-ugly"),
+           ("GStreamer", "gst-plugins-bad"),
+           ("GStreamer", "gst-libav"),
+           ("GStreamer", "gst-devtools"),
+           ("GStreamer", "gst-editing-services")]
 
 if len(sys.argv) > 1:
     MODULES = sys.argv[1:]
 
-for m in MODULES:
-    print("Downloading XML file for %s" % m)
+os.system(" ./add_user.php bugzilla_import gstreamer.bugzilla.import@gmail.com 'GStreamer bugzilla importer' thiblahute")
+for c, m in MODULES:
+    cm = c
+    if m:
+        cm += "/%s" % m
+    else:
+        m = c
 
-    if os.system("./downloadbzbugs 'GStreamer/%s' 'outfiles/%s.xml'" % (m, m)) != 0:
+    print("Downloading XML file for %s" % m)
+    if os.system("./downloadbzbugs '%s' 'outfiles/%s.xml'" % (cm, m)) != 0:
         print("%s failed downloading" % m)
         exit(1)
 
@@ -38,7 +45,6 @@ for m in MODULES:
         pass
 
     print("Importing bugs %s" % m)
-    if os.system(os.path.join(os.environ["PHABRICATOR_ROOT"],
-                              "scripts/phill/phill.php") + " --input 'outfiles/%s.json' -v 2 > 'outfiles/%s/phill_%s.logs' 2>&1" % (m, m, m)) != 0:
+    if os.system("./phill.php --input 'outfiles/%s.json' -v 2 > 'outfiles/%s/phill_%s.logs' 2>&1" % (m, m, m)) != 0:
         print("%s failed to import bugs into phabricator" % m)
         exit(1)
