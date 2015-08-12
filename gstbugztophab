@@ -14,9 +14,9 @@ MODULES = [("pitivi", None),
            ("GStreamer", "gst-editing-services")]
 
 if len(sys.argv) > 1:
-    MODULES = sys.argv[1:]
+    MODULES = [m for m in MODULES if m[0] in sys.argv]
 
-os.system(" ./add_user.php bugzilla_import gstreamer.bugzilla.import@gmail.com 'GStreamer bugzilla importer' thiblahute")
+os.system(" ./add_user.php gst_bugzilla_importer gstreamer.bugzilla.import@gmail.com 'GStreamer bugzilla importer' thiblahute")
 for c, m in MODULES:
     cm = c
     if m:
@@ -30,7 +30,7 @@ for c, m in MODULES:
         exit(1)
 
     print("Adding users for %s" % m)
-    if os.system("./bzuserstophab 'outfiles/%s.xml' bugzilla_import" % (m)) != 0:
+    if os.system("./bzuserstophab 'outfiles/%s.xml' gst_bugzilla_importer" % (m)) != 0:
         print("%s failed adding users" % m)
         exit(1)
 
