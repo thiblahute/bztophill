@@ -210,8 +210,27 @@ class PhillImporter
     return $task;
   }
 
+  protected function checkTransactionIsNew($task, $date)
+  {
+      $user = id(new PhabricatorUser())->loadOneWhere('phid = %s', $task->getAuthorPHID());
+
+      $transactions = id(new ManiphestTransactionQuery())
+          ->setViewer($user)
+          ->withObjectPHIDs(mpull(array($task), 'getPHID'))
+          ->needComments(true)
+          ->execute();
+
+      foreach ($transactions as $tr)
+          if ($tr->getDateCreated() == $date) {
+              return false;
+          }
+
+      return true;
+  }
+
   protected function task_import($json)
   {
+    $res = false;
     debug("task: begin");
     $user = $this->user_lookup($json->creator);
 
@@ -220,39 +239,51 @@ class PhillImporter
     if ($task) {
       $this->tasks[$json->id] = $task;
       debug("task: {$PHID}: already imported '$json->id'");
-      return false;
     }
 
-    notice("task: $PHID: creating '$json->title'");
-
+    $date = strtotime($json->creationDate);
     $description = $this->blurb_fixup_references($json->description);
     $description = "$description\n\nImported from $json->url";
-    $date = strtotime($json->creationDate);
+    $transactions = null;
+    if (!$task) {
+        notice("task: $PHID: creating '$json->title'");
 
-    $task = ManiphestTask::initializeNewTask($user)
-      ->openTransaction()
-      ->setTitle(null)
-      ->setPHID($PHID)
-      ->setDescription($description)
-      ->setDateCreated($date);
+        $task = ManiphestTask::initializeNewTask($user)
+            ->openTransaction()
+            ->setTitle(null)
+            ->setPHID($PHID)
+            ->setDescription($description)
+            ->setDateCreated($date);
+
+        $res = true;
+        $transactions[] = $this->transaction_create('ManiphestTransaction', PhabricatorTransactions::TYPE_SUBSCRIBERS, array('=' => array($user->getPHID())), $date, null);
+    } else {
+        $task->openTransaction();
+    }
+
 
     $editor = id(new ManiphestTransactionEditor());
-
     $title = $this->blurb_fixup_references($json->title);
-    $transactions[] = $this->transaction_create('ManiphestTransaction', ManiphestTransaction::TYPE_TITLE, $title, $date, null);
-    $transactions[] = $this->transaction_create('ManiphestTransaction', PhabricatorTransactions::TYPE_SUBSCRIBERS, array('=' => array($user->getPHID())), $date, null);
-    $transactions[] = $this->transaction_create('ManiphestTransaction', ManiphestTransaction::TYPE_OWNER, $user->getPHID(), $date, null);
+    if ($user->getPHID() != $task->getOwnerPHID())
+        $transactions[] = $this->transaction_create('ManiphestTransaction', ManiphestTransaction::TYPE_OWNER, $user->getPHID(), $date, null);
+    if ($task->getDescription() != $description)
+        $transactions[] = $this->transaction_create('ManiphestTransaction', ManiphestTransaction::TYPE_DESCRIPTION, $description, $date, null);
+    if ($task->getTitle() != $title)
+        $transactions[] = $this->transaction_create('ManiphestTransaction', ManiphestTransaction::TYPE_TITLE, $title, $date, null);
+
     notice("transaction: {$task->getPHID()}: initial title and subscribers");
-    $this->transactions_apply($editor, $task, $user, $transactions);
+    if ($transactions != null)
+        $this->transactions_apply($editor, $task, $user, $transactions);
 
     $this->tasks[$json->id] = $task;
 
     $task->saveTransaction();
     notice("task: {$task->getPHID()}: imported '$json->title' as {$task->getMonogram()}");
-    return true;
+
+    return $res;
   }
 
-  protected function task_import_transactions($task, $json)
+  protected function task_import_transactions($task, $json, $new)
   {
     $task->openTransaction();
 
@@ -262,7 +293,9 @@ class PhillImporter
       $idx += 1; # show indexes starting from 1
       notice("task: {$task->getPHID()}: transaction begin $idx of $count");
       $user = $this->user_lookup($j->actor);
-      $txn = $this->transaction_parse($task, $j);
+      $txn = $this->transaction_parse($task, $j, $new);
+      if (!$txn)
+          continue;
       $this->transactions_apply($editor, $task, $user, array($txn));
       notice("task: {$task->getPHID()}: transaction done");
     }
@@ -307,7 +340,7 @@ class PhillImporter
     return $PHIDs;
   }
 
-  protected function transaction_parse(ManiphestTask $task, $json)
+  protected function transaction_parse(ManiphestTask $task, $json, $new_task)
   {
     $date = strtotime($json->date);
     $type = $this->transaction_parse_type($json->type);
@@ -315,27 +348,52 @@ class PhillImporter
     $comment = property_exists($json, 'comment') ? $json->comment : '';
     $comment = $this->blurb_fixup_references($comment);
     $metadata = null;
+    $check_new = false;
 
     switch($json->type) {
       case "owner":
         $value = $this->user_lookup($value)->getPHID();
+        if (!$new_task) {
+            return null;
+        }
         break;
       case "description":
         $desc = explode("\n", trim($task->getDescription()));
         $tagline = end($desc);
         $value = $this->blurb_fixup_references($value);
         $value = "$value\n\n$tagline";
+
+        $value = "$value\n\nImported from $json->url";
+        if (!$new_task) {
+            if ($task->getDescription() == $value)
+                return null;
+        }
         break;
       case "priority":
+          if (!$new_task) {
+              if ($task->getPriority() == $value)
+                  return null;
+          }
         break;
       case "attachment":
         $monogram = $this->file_ensure($task, $value)->getMonogram();
         $comment = "Uploaded {{$monogram}}\n\n$comment";
+        $check_new = true;
         break;
       case "status":
         $value = $this->status_parse($value);
+          if (!$new_task) {
+              if ($task->getStatus() == $value)
+                  return null;
+          }
+        break;
         break;
       case "projects":
+          if ($new_task) {
+              // FIXME try to be smart here :)
+              return null;
+          }
+
         if (property_exists($value, '+'))
           $t['+'] = $this->project_get_PHIDs($value->{'+'});
         if (property_exists($value, '-'))
@@ -354,7 +412,15 @@ class PhillImporter
           $t['='] = $this->users_lookup_PHIDs($value->{'-'});
         $value = $t;
         break;
+      case "comment":
+        $check_new = true;
+        break;
     }
+
+    if ($check_new && !$this->checkTransactionIsNew($task, $date)) {
+        return null;
+    }
+
 
     $transaction = $this->transaction_create('ManiphestTransaction', $type, $value, $date, $comment);
     if ($metadata)
@@ -440,14 +506,21 @@ class PhillImporter
       $this->project_import($project);
 
     $imported = array();
-    foreach($tasks as $id=>$task)
-      if ($this->task_import($task))
-        $imported[$id] = $task;
+    $updates = array();
+    foreach($tasks as $id=>$task){
+        if ($this->task_import($task))
+            $imported[$id] = $task;
+        else
+            $updates[$id] = $task;
+    }
 
     # import task transactions as a separate step to be able to update the
     # issue references in descriptions and comments
     foreach($imported as $id=>$task)
-      $this->task_import_transactions($this->tasks[$id], $task);
+      $this->task_import_transactions($this->tasks[$id], $task, true);
+
+    foreach($updates as $id=>$task)
+      $this->task_import_transactions($this->tasks[$id], $task, false);
 
     $this->process_commit_level_end($connections);
     debug("process: end");
