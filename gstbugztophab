@@ -25,9 +25,10 @@ for c, m in MODULES:
         m = c
 
     print("Downloading XML file for %s" % m)
-    if os.system("./downloadbzbugs '%s' 'outfiles/%s.xml'" % (cm, m)) != 0:
-        print("%s failed downloading" % m)
-        exit(1)
+    if "--update" in sys.argv or not os.path.exists('outfiles/%s.xml' % m):
+        if os.system("./downloadbzbugs '%s' 'outfiles/%s.xml'" % (cm, m)) != 0:
+            print("%s failed downloading" % m)
+            exit(1)
 
     print("Adding users for %s" % m)
     if os.system("./bzuserstophab 'outfiles/%s.xml' gst_bugzilla_importer" % (m)) != 0:
