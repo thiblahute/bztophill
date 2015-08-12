@@ -143,7 +143,7 @@ class Converter:
             'date': date,
             'type': kind,
         }
-        if value:
+        if value is not None:
             ret['value'] = value
         if comment:
             ret['comment'] = comment
@@ -159,7 +159,7 @@ class Converter:
                   " pieces")
             exit(1)
 
-    def priority_parse(self, status):
+    def priority_parse(self, severity):
         m = {
             "blocker": 100,
             "critical": 80,
@@ -170,7 +170,7 @@ class Converter:
             "enhancement": 0,
         }
 
-        return m[status]
+        return m[severity]
 
     def status_parse(self, bug):
         status = bug.findtext("bug_status")
