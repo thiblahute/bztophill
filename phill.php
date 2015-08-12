@@ -90,17 +90,6 @@ class PhillImporter
     return $status;
   }
 
-  protected function priority_parse($priority)
-  {
-    $map = ManiphestTaskPriority::getTaskPriorityMap();
-    if (!isset($map[$priority])) {
-      warning("priority: '$priority' is not valid");
-      return null;
-    }
-    $priority = $map[$priority];
-    return $priority;
-  }
-
   protected function blurb_fixup_references($blurb)
   {
     if (!$blurb)
@@ -338,7 +327,6 @@ class PhillImporter
         $value = "$value\n\n$tagline";
         break;
       case "priority":
-        $value = $this->priority_parse($value);
         break;
       case "attachment":
         $monogram = $this->file_ensure($task, $value)->getMonogram();
