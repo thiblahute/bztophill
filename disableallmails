@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Disable self mails for all users defined in <json_file>
+
+Usage:
+  disableallmails <json_file> [-o=outdir -r=phabricator_rootdir]
+
+Options:
+  -o=outfiles_dir              Were to put generated/downloaded files
+  -r=phabricator_rootdir       Were to put generated/downloaded files
+  -h --help                    Show this screen.
+  --version                    Show version.
+"""
+try:
+    from config import people_who_do_not_want_an_account
+except:
+    people_who_do_not_want_an_account = {}
+
+from docopt import docopt
+import os
+import json
+
+class MailDisabler:
+    def __init__(self, outfiles_dir, phab_root):
+        self.outfiles_dir = outfiles_dir
+        self.phab_root = phab_root
+
+    def disable_mails(self, filename):
+        try:
+            print("Disable mails from %s" % filename)
+            success_file = open(filename, "r", encoding='utf-8-sig')
+            users = json.load(success_file)
+            success_file.close()
+        except FileNotFoundError as e:
+            print("%s" % e)
+            users = {}
+            exit(1)
+
+        logdir = os.path.join(self.outfiles_dir, "disable_mails_logs")
+        try:
+            os.mkdir(logdir)
+        except FileExistsError:
+            pass
+
+        for mail in users.keys():
+            if people_who_do_not_want_an_account.get(mail):
+                print("%s does not want an account" % mail)
+                continue
+
+            command = "./set_mail_notifications.php '%s' self-mail 1" % (mail)
+            print("Running ", command)
+
+            if os.system(command) != 0:
+                print("FAILLED disabling mail for %s" % mail)
+
+def main(arguments):
+    filename = arguments['<json_file>']
+    outfiles_dir = arguments.get('-o', "outfiles")
+    if not outfiles_dir:
+        outfiles_dir = "outfiles"
+
+    phab_root = arguments.get('-r', None)
+    try:
+        os.mkdir(outfiles_dir)
+    except FileExistsError:
+        pass
+
+    if not os.environ.get("PHABRICATOR_ROOT"):
+        if not phab_root:
+            raise RuntimeError("You need to set phabricator root directory environment variable to run this script"
+                               " (either through the PHABRICATOR_ROOT environment variable or the -r=phabricator_rootdir option).")
+        os.environ["PHABRICATOR_ROOT"] = phab_root
+
+    mail_disabler = MailDisabler(outfiles_dir, phab_root)
+    mail_disabler.disable_mails(filename)
+
+if __name__ == '__main__':
+    arguments = docopt(__doc__, version='disableallmails 0.1')
+    main(arguments)
