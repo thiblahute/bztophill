@@ -1,0 +1,5 @@
+pitivi.xml filter=lfs diff=lfs merge=lfs -text
+outfiles/pitivi.xml filter=lfs diff=lfs merge=lfs -text
+outfiles/*.xml
+
+ filter=lfs diff=lfs merge=lfs -text
