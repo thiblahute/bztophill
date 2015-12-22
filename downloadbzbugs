@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 from docopt import docopt
 from configparser import RawConfigParser
 import xml.etree.ElementTree as ET
+import requests
 
 try:
     from sqlite3 import dbapi2 as sqlite
@@ -202,15 +203,24 @@ Configured browser: %s
 Possible browsers: %s""" %
             (e, browser, browser_list()))
 
+def response_stream_to_file(r, f, decode_unicode=False):
+    total = 0
+    print(r.url, end="", flush=True)
+    for chunk in r.iter_content(chunk_size=1024, decode_unicode=decode_unicode):
+        total += len(chunk)
+        print("\r\033[K", r.url, " downloaded ", total, " bytes", sep="", end="", flush=True)
+        f.write(chunk)
+    print()
+
 def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
     # Not that we do not use the 'standard' xmlrpc protocol as the
     # generated XML is more complex to parse.
     # And we do not use python-bugzilla to avoid making thousands
     # of queries on the server which would take much longer
 
-    query_url = "%s/buglist.cgi?limit=0&product=%s&ctype=rdf" % (base_url, product)
+    params = { "limit": 0, "product": product, "ctype": "rdf" }
     if component:
-        query_url += "&component=%s" % component
+        params["component"] = component
 
     if component:
         fname = re.compile('[^a-zA-Z]').sub("", product + component)
@@ -219,10 +229,9 @@ def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
 
     rdf_path = os.path.join(outfiles_dir, "%s.rdf" % fname)
 
-    if os.system("wget '%s' -O %s" % (query_url, rdf_path)) != 0:
-        print("ERROR: Could not get list of bugs for %s/%s" % (product, component))
-
-        return None
+    r = requests.get(base_url + "/buglist.cgi", params=params, cookies=cookies, stream=True)
+    with open(rdf_path, "w") as f:
+        response_stream_to_file(r, f, decode_unicode=True)
 
     rdf_root = ET.parse(rdf_path).getroot()
 
@@ -233,18 +242,13 @@ def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
 
     bug_ids = [bugid.text for bugid in rdf_root.findall(bug_ids_path)]
 
-    # Use curl to make a simple POST query on the bugzilla server
-    cookie_str = "-H 'Cookie: Bugzilla_login=%(Bugzilla_login)s; Bugzilla_logincookie=%(Bugzilla_logincookie)s;' " % cookies
-    curl_command = "curl '%s/show_bug.cgi' --compressed %s " \
-        "-H 'Connection: keep-alive' " \
-        "--data 'ctype=xml&id=%s' > '%s'" % (base_url, cookie_str, '&id='.join(bug_ids), outfile)
-
-    if os.system(curl_command) == 0:
-        return True
-    else:
-        print("ERROR: Could not get XML for %s/%s" % (product, component))
-        return False
-
+    r = requests.post(base_url + "/show_bug.cgi",
+            cookies=cookies,
+            data={"ctype": "xml", "id": bug_ids},
+            stream=True
+        )
+    with open(outfile, "w") as f:
+        response_stream_to_file(r, f, decode_unicode=True)
 
 def main(arguments):
     product_component = arguments["<product/component>"].split("/")
