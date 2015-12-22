@@ -266,11 +266,6 @@ def main(arguments):
     except FileExistsError:
         pass
 
-    try:
-        os.mkdir(outfiles_dir)
-    except FileExistsError:
-        pass
-
     url = arguments.get('--base-url', DEFAULT_SERVER)
     cookies = get_bugzilla_cookies(urlparse(url).netloc, arguments.get("--browser"))
     return download_xml(url, cookies, product, component,
