@@ -253,13 +253,7 @@ def main(arguments):
     product_component = arguments["<product/component>"].split("/")
 
     product = product_component[0]
-    if len(product_component) == 2:
-        component = product_component[1]
-    elif len(product_component) == 1:
-        component = None
-    else:
-        assert("Could not find a product/component information from %s"
-               % arguments["<product/component>"])
+    component = product_component[1] if len(product_component) > 1 else None
 
     outfiles_dir = arguments.get('--od', "outfiles")
     try:
