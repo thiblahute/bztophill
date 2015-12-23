@@ -29,8 +29,6 @@ try:
 except ImportError:
     from pysqlite2 import dbapi2 as sqlite
 
-DEFAULT_SERVER = 'https://bugzilla.gnome.org'
-
 # All cookie retrieval related code was taken from git-bz: http://git.fishsoup.net/cgit/git-bz/
 class CookieError(Exception):
     pass
@@ -190,10 +188,7 @@ browsers = {'firefox3': get_bugzilla_cookies_ff3,
 def browser_list():
     return ", ".join(sorted(browsers.keys()))
 
-def get_bugzilla_cookies(host, browser=None):
-    if not browser:
-        browser = "firefox3"
-
+def get_bugzilla_cookies(host, browser):
     if browser in browsers:
         do_get_cookies = browsers[browser]
     else:
@@ -263,7 +258,7 @@ def main(arguments):
     except FileExistsError:
         pass
 
-    url = arguments.get('--base-url', DEFAULT_SERVER)
+    url = arguments.get('--base-url')
     cookies = get_bugzilla_cookies(urlparse(url).netloc, arguments.get("--browser"))
     return download_xml(url, cookies, product, component,
                         arguments.get('<outfile>'), outfiles_dir)
