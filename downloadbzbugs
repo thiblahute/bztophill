@@ -3,14 +3,14 @@
 """Download backup XML from bugzilla
 
 Usage:
-  downloadbzbugs <product/component> <outfile> [--browser=browser -od]
+  downloadbzbugs <product/component> <outfile> [--browser=BROWSER --od=OUTFILES_DIR]
 
 Options:
-  --browser=browser Name of the browser where to find cookie to connect to bugzilla (default: firefox3)
-  -od=outfiles_dir  Were to put generated/downloaded files
+  --browser=BROWSER  Name of the browser where to find cookie to connect to bugzilla [default: firefox3].
+  --od=OUTFILES_DIR  Where to put generated/downloaded files.
 
-  -h --help       Show this screen.
-  --version       Show version.
+  -h --help          Show this screen.
+  --version          Show version.
 """
 import os
 import re
@@ -260,7 +260,7 @@ def main(arguments):
         assert("Could not find a product/component information from %s"
                % arguments["<product/component>"])
 
-    outfiles_dir = arguments.get('-od', "outfiles")
+    outfiles_dir = arguments.get('--od', "outfiles")
     try:
         os.mkdir(outfiles_dir)
     except FileExistsError:
