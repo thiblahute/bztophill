@@ -3,12 +3,11 @@
 """Download backup XML from bugzilla
 
 Usage:
-  downloadbzbugs <product/component> <outfile> [--browser=BROWSER --od=OUTFILES_DIR --base-url=URL]
+  downloadbzbugs <product/component> <outdir> [--browser=BROWSER --base-url=URL]
 
 Options:
   --base-url=URL     Base URL of the Bugzilla instance [default: https://bugzilla.gnome.org].
   --browser=BROWSER  Name of the browser where to find cookie to connect to bugzilla [default: firefox3].
-  --od=OUTFILES_DIR  Where to put generated/downloaded files.
 
   -h --help          Show this screen.
   --version          Show version.
@@ -213,7 +212,7 @@ def response_stream_to_file(r, f, decode_unicode=False):
         f.write(chunk)
     print()
 
-def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
+def download_xml(base_url, cookies, product, component, outdir):
     # Not that we do not use the 'standard' xmlrpc protocol as the
     # generated XML is more complex to parse.
     # And we do not use python-bugzilla to avoid making thousands
@@ -228,7 +227,9 @@ def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
     else:
         fname = re.compile('[^a-zA-Z]').sub("", product)
 
-    rdf_path = os.path.join(outfiles_dir, "%s.rdf" % fname)
+    rdf_path = os.path.join(outdir, "%s.rdf" % fname)
+
+    os.makedirs(outdir)
 
     r = requests.get(base_url + "/buglist.cgi", params=params, cookies=cookies, stream=True)
     with tempfile.NamedTemporaryFile("w", dir=outdir) as f:
@@ -251,7 +252,8 @@ def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
         )
     with tempfile.NamedTemporaryFile("w", dir=outdir) as f:
         response_stream_to_file(r, f, decode_unicode=True)
-        os.link(f.name, outfile)
+        bugsfile = os.path.join(outdir, "bugs.xml")
+        os.link(f.name, bugsfile)
 
 def main(arguments):
     product_component = arguments["<product/component>"].split("/")
@@ -259,16 +261,9 @@ def main(arguments):
     product = product_component[0]
     component = product_component[1] if len(product_component) > 1 else None
 
-    outfiles_dir = arguments.get('--od', "outfiles")
-    try:
-        os.mkdir(outfiles_dir)
-    except FileExistsError:
-        pass
-
     url = arguments.get('--base-url')
     cookies = get_bugzilla_cookies(urlparse(url).netloc, arguments.get("--browser"))
-    return download_xml(url, cookies, product, component,
-                        arguments.get('<outfile>'), outfiles_dir)
+    return download_xml(url, cookies, product, component, arguments.get('<outdir>'))
 
 
 if __name__ == '__main__':
