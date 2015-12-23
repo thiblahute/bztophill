@@ -238,9 +238,9 @@ def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
 
     # Use curl to make a simple POST query on the bugzilla server
     cookie_str = "-H 'Cookie: Bugzilla_login=%(Bugzilla_login)s; Bugzilla_logincookie=%(Bugzilla_logincookie)s;' " % cookies
-    curl_command = "curl 'https://bugzilla.gnome.org/show_bug.cgi' --compressed %s " \
+    curl_command = "curl '%s/show_bug.cgi' --compressed %s " \
         "-H 'Connection: keep-alive' " \
-        "--data 'ctype=xml&id=%s' > '%s'" % (cookie_str, '&id='.join(bug_ids), outfile)
+        "--data 'ctype=xml&id=%s' > '%s'" % (base_url, cookie_str, '&id='.join(bug_ids), outfile)
 
     if os.system(curl_command) == 0:
         return True
