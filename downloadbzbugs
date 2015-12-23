@@ -250,10 +250,25 @@ def download_xml(base_url, cookies, product, component, outdir):
             data={"ctype": "xml", "id": bug_ids},
             stream=True
         )
+    bugsfile = os.path.join(outdir, "bugs.xml")
     with tempfile.NamedTemporaryFile("w", dir=outdir) as f:
         response_stream_to_file(r, f, decode_unicode=True)
-        bugsfile = os.path.join(outdir, "bugs.xml")
         os.link(f.name, bugsfile)
+
+    attachmentsdir = os.path.join(outdir, "attachments")
+    os.makedirs(attachmentsdir)
+    root = ET.parse(bugsfile).getroot()
+    for attachment in root.findall("*/attachment"):
+        if attachment.find("data") is not None:
+            continue
+        attachid = attachment.findtext("attachid")
+        r = requests.get(base_url + "/attachment.cgi",
+                params={"id": attachid},
+                cookies=cookies,
+                stream=True)
+        with tempfile.NamedTemporaryFile("wb", dir=attachmentsdir) as f:
+            response_stream_to_file(r, f)
+            os.link(f.name, os.path.join(attachmentsdir, "attach.%s.dat" % attachid))
 
 def main(arguments):
     product_component = arguments["<product/component>"].split("/")
