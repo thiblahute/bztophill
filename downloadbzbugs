@@ -3,9 +3,10 @@
 """Download backup XML from bugzilla
 
 Usage:
-  downloadbzbugs <product/component> <outfile> [--browser=BROWSER --od=OUTFILES_DIR]
+  downloadbzbugs <product/component> <outfile> [--browser=BROWSER --od=OUTFILES_DIR --base-url=URL]
 
 Options:
+  --base-url=URL     Base URL of the Bugzilla instance [default: https://bugzilla.gnome.org].
   --browser=BROWSER  Name of the browser where to find cookie to connect to bugzilla [default: firefox3].
   --od=OUTFILES_DIR  Where to put generated/downloaded files.
 
