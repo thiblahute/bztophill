@@ -202,8 +202,10 @@ def get_bugzilla_cookies(host, browser=None):
     try:
         return do_get_cookies(host)
     except CookieError as e:
-        die("""Error %s getting login cookie from browser: Configured browser: %s Possible browsers: %s""" %
-            (str(e), browser, browser_list()))
+        die("""Error getting login cookie from browser: %s
+Configured browser: %s
+Possible browsers: %s""" %
+            (e, browser, browser_list()))
 
 def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
     # Not that we do not use the 'standard' xmlrpc protocol as the
