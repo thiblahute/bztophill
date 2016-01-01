@@ -24,6 +24,7 @@ from docopt import docopt
 from configparser import RawConfigParser
 import xml.etree.ElementTree as ET
 import requests
+import tempfile
 
 try:
     from sqlite3 import dbapi2 as sqlite
@@ -230,8 +231,9 @@ def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
     rdf_path = os.path.join(outfiles_dir, "%s.rdf" % fname)
 
     r = requests.get(base_url + "/buglist.cgi", params=params, cookies=cookies, stream=True)
-    with open(rdf_path, "w") as f:
+    with tempfile.NamedTemporaryFile("w", dir=outdir) as f:
         response_stream_to_file(r, f, decode_unicode=True)
+        os.link(f.name, rdf_path)
 
     rdf_root = ET.parse(rdf_path).getroot()
 
@@ -247,8 +249,9 @@ def download_xml(base_url, cookies, product, component, outfile, outfiles_dir):
             data={"ctype": "xml", "id": bug_ids},
             stream=True
         )
-    with open(outfile, "w") as f:
+    with tempfile.NamedTemporaryFile("w", dir=outdir) as f:
         response_stream_to_file(r, f, decode_unicode=True)
+        os.link(f.name, outfile)
 
 def main(arguments):
     product_component = arguments["<product/component>"].split("/")
