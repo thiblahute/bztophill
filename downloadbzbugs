@@ -219,35 +219,58 @@ def download_xml(base_url, cookies, product, component, outdir):
     # And we do not use python-bugzilla to avoid making thousands
     # of queries on the server which would take much longer
 
-    params = { "limit": 0, "product": product, "ctype": "csv" }
+    params = { "offset": 0, "product": product, "ctype": "csv" }
     if component:
         params["component"] = component
 
     os.makedirs(outdir)
 
-    r = requests.get(base_url + "/buglist.cgi", params=params, cookies=cookies)
+    bug_ids = []
+    while True:
+        # we can't be sure that we got all the bugs or we just hit the rows
+        # limit configured for the current bugzilla instance, so try again
+        # until we get an empty list
+        print("listing bugs at offset", params['offset'])
+        print(base_url + "/buglist.cgi")
+        r = requests.get(base_url + "/buglist.cgi", params=params, cookies=cookies)
 
-    reader = csv.DictReader(r.text.splitlines())
-    bug_ids = [row["bug_id"] for row in reader]
+        reader = csv.DictReader(r.text.splitlines())
+        ids = [row["bug_id"] for row in reader]
+        if not ids:
+            break
+        bug_ids += ids
+        params["offset"] += len(ids)
     bug_ids.sort()
 
-    r = requests.post(base_url + "/show_bug.cgi",
-            cookies=cookies,
-            data={"ctype": "xml", "id": bug_ids},
-            stream=True
-        )
-    bugsfile = os.path.join(outdir, "bugs.xml")
-    with tempfile.NamedTemporaryFile("w", dir=outdir) as f:
-        response_stream_to_file(r, f, decode_unicode=True)
-        os.link(f.name, bugsfile)
+    bugsfiles = []
+    batch = 1000
+    for offset in range(0, len(bug_ids), batch):
+        ids = bug_ids[offset:offset+batch]
+        print("fetching", len(ids), "bugs at offset", offset, "of", len(bug_ids))
+        print(base_url + "/show_bug.cgi")
+
+        r = requests.post(base_url + "/show_bug.cgi",
+                cookies=cookies,
+                data={"ctype": "xml", "id": ids},
+                stream=True
+            )
+        idx = len(bugsfiles) + 1
+        with tempfile.NamedTemporaryFile("w", dir=outdir) as f:
+            response_stream_to_file(r, f, decode_unicode=True)
+            bugsfile = os.path.join(outdir, "bugs.%04d.xml" % idx)
+            os.link(f.name, bugsfile)
+            bugsfiles.append(bugsfile)
+
+    attach_ids = []
+    for bugsfile in bugsfiles:
+        root = ET.parse(bugsfile).getroot()
+        attach_ids += (a.findtext("attachid") for a in root.findall("*/attachment") if a.find("data") is None)
 
     attachmentsdir = os.path.join(outdir, "attachments")
     os.makedirs(attachmentsdir)
-    root = ET.parse(bugsfile).getroot()
-    for attachment in root.findall("*/attachment"):
-        if attachment.find("data") is not None:
-            continue
-        attachid = attachment.findtext("attachid")
+    for count, attachid in enumerate(attach_ids):
+        print("fetching attachment", count, "of", len(attach_ids))
+        print(base_url + "/attachment.cgi")
         r = requests.get(base_url + "/attachment.cgi",
                 params={"id": attachid},
                 cookies=cookies,
