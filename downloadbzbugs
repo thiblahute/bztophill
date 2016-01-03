@@ -25,6 +25,7 @@ import xml.etree.ElementTree as ET
 import csv
 import requests
 import tempfile
+import glob
 
 try:
     from sqlite3 import dbapi2 as sqlite
@@ -220,9 +221,9 @@ class Downloader:
         self.outdir = outdir
 
     def setup(self):
-        os.makedirs(self.outdir)
+        os.makedirs(self.outdir, exist_ok=True)
         self.attachmentsdir = os.path.join(self.outdir, "attachments")
-        os.makedirs(self.attachmentsdir)
+        os.makedirs(self.attachmentsdir, exist_ok=True)
 
     def bug_list(self, product, component):
         params = { "offset": 0, "product": product, "ctype": "csv" }
@@ -247,8 +248,15 @@ class Downloader:
         bug_ids.sort()
         return bug_ids
 
+    def bug_skip(self):
+        bug_ids = []
+        for bugsfile in glob.iglob(os.path.join(self.outdir, "bugs.*.xml")):
+            root = ET.parse(bugsfile).getroot()
+            bug_ids += (b.text for b in root.findall("bug/bug_id"))
+        return bug_ids
+
     def bug_fetch(self, bug_ids):
-        bugsfiles = []
+        bugsfiles = glob.glob(os.path.join(self.outdir, "bugs.*.xml"))
         batch = 1000
         for offset in range(0, len(bug_ids), batch):
             ids = bug_ids[offset:offset+batch]
@@ -274,6 +282,10 @@ class Downloader:
             root = ET.parse(bugsfile).getroot()
             attach_ids += (a.findtext("attachid") for a in root.findall("*/attachment") if a.find("data") is None)
         return attach_ids
+
+    def attachment_skip(self):
+        ids = [os.path.basename(f).lstrip('attach.').rstrip('.dat') for f in glob.iglob(os.path.join(self.attachmentsdir, "attach.*.dat"))]
+        return ids
 
     def attachment_fetch(self, attach_ids):
         attachfiles = []
@@ -303,8 +315,12 @@ def main(arguments):
     downloader = Downloader(url, cookies, arguments.get('<outdir>'))
     downloader.setup()
     bug_ids = downloader.bug_list(product, component)
+    bug_skip = downloader.bug_skip()
+    bug_ids = list(sorted(set(bug_ids) - set(bug_skip)))
     bugsfiles = downloader.bug_fetch(bug_ids)
     attach_ids = downloader.attachment_list(bugsfiles)
+    attach_skip = downloader.attachment_skip()
+    attach_ids = list(sorted(set(attach_ids) - set(attach_skip)))
     downloader.attachment_fetch(attach_ids)
 
 if __name__ == '__main__':
