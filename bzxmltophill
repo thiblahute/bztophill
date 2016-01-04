@@ -30,7 +30,7 @@ except:
 try:
     from config import project_names
 except:
-    project_ids = {}
+    project_names = {}
 
 class Converter:
     def __init__(self):
