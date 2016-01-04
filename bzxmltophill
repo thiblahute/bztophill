@@ -3,10 +3,9 @@
 """Converts Bugzilla XML files to something Phabricator's Phill may like.
 
 Usage:
-  bzxmltophill <bz.xml> <outfile> [--base-url=url --od=utfiles_dir]
+  bzxmltophill <bz.xml> <outfile> [--od=utfiles_dir]
 
 Options:
-  --base-url=url    The default base URL for projects and tasks
   --od=outfiles_dir Where to put generated/downloaded files
   -h --help         Show this screen.
   --version         Show version.
@@ -18,9 +17,6 @@ import xml.etree.ElementTree as ET
 import json
 import os
 import re
-import base64
-
-DEFAULT_SERVER = 'https://bugzilla.gnome.org'
 
 try:
     from config import project_ids
@@ -37,11 +33,6 @@ class Converter:
         self.root = None
         self.projects = []
         self.tasks = []
-        self.base_url = DEFAULT_SERVER
-
-    def set_base_url(self, url):
-        if url:
-            self.base_url = url
 
     def url(self, i):
         return self.base_url + "/show_bug.cgi?id=" + i.findtext("bug_id")
@@ -53,6 +44,7 @@ class Converter:
             pass
 
         self.root = ET.parse(filename).getroot()
+        self.base_url = self.root.get("urlbase")
 
     def convert(self):
         self.projects_convert()
@@ -201,25 +193,8 @@ class Converter:
         return None
 
     def get_attachement(self, attachment):
-        output = "attachements/%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename"))
-        if os.path.exists(output):
-            return output
-
-        data = attachment.findtext("data")
-        if data:
-            data = base64.b64decode(data)
-            open(output, "wb").write(data)
-
-            return output
-
-        return self.download_attachement(attachment)
-
-    def download_attachement(self, attachment):
-        output = "attachements/%s-%s" % (attachment.findtext("attachid"), attachment.findtext("filename"))
-        os.system("wget '%s/attachment.cgi?id=%s' -O '%s'"
-                  % (self.base_url, attachment.findtext("attachid"), output))
-
-        return output
+        attachid = attachment.findtext("attachid")
+        return "attachement/attach.%s.dat" % attachid
 
     def convert_transactions(self, bug):
         transactions = []
@@ -310,8 +285,6 @@ def main(arguments):
         pass
 
     converter = Converter()
-    if '--base-url' in arguments:
-        converter.set_base_url(arguments['--base-url'])
 
     converter.load(filename)
     data = converter.convert()
