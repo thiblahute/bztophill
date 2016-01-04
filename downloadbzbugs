@@ -26,6 +26,7 @@ import csv
 import requests
 import tempfile
 import glob
+import base64
 
 try:
     from sqlite3 import dbapi2 as sqlite
@@ -283,6 +284,31 @@ class Downloader:
             attach_ids += (a.findtext("attachid") for a in root.findall("*/attachment") if a.find("data") is None)
         return attach_ids
 
+    def attachment_extract(self, bugsfiles):
+        attach_ids = []
+        for bugsfile in bugsfiles:
+            et = ET.parse(bugsfile)
+            root = et.getroot()
+            attachments = [a for a in root.findall("*/attachment") if a.find("data") is not None]
+            for count, a in enumerate(attachments):
+                print("extracting attachment", count+1, "of", len(attachments), "from", bugsfile)
+                data = a.find("data")
+                assert data.get('encoding') == 'base64'
+                attachid = a.findtext("attachid")
+                attachfile = os.path.join(self.attachmentsdir, "attach.%s.dat" % attachid)
+                if os.path.exists(attachfile):
+                    continue
+                raw = base64.b64decode(data.text)
+                with tempfile.NamedTemporaryFile("wb", dir=self.attachmentsdir) as f:
+                    f.write(raw)
+                    os.link(f.name, attachfile)
+                a.remove(data)
+                attach_ids.append(attachid)
+            with tempfile.NamedTemporaryFile("wb", dir=self.outdir, delete=False) as f:
+                et.write(f, encoding='utf-8', xml_declaration=True)
+                os.replace(f.name, bugsfile)
+        return attach_ids
+
     def attachment_skip(self):
         ids = [os.path.basename(f).lstrip('attach.').rstrip('.dat') for f in glob.iglob(os.path.join(self.attachmentsdir, "attach.*.dat"))]
         return ids
@@ -319,6 +345,7 @@ def main(arguments):
     bug_ids = list(sorted(set(bug_ids) - set(bug_skip)))
     bugsfiles = downloader.bug_fetch(bug_ids)
     attach_ids = downloader.attachment_list(bugsfiles)
+    downloader.attachment_extract(bugsfiles)
     attach_skip = downloader.attachment_skip()
     attach_ids = list(sorted(set(attach_ids) - set(attach_skip)))
     downloader.attachment_fetch(attach_ids)
