@@ -3,13 +3,13 @@
 """Converts Bugzilla XML files to something Phabricator's Phill may like.
 
 Usage:
-  bzxmltophill <bz.xml> <outfile> [--base-url=url -od]
+  bzxmltophill <bz.xml> <outfile> [--base-url=url --od=utfiles_dir]
 
 Options:
-  --base-url=url  The default base URL for projects and tasks
-  -od=outfiles_dir Were to put generated/downloaded files
-  -h --help       Show this screen.
-  --version       Show version.
+  --base-url=url    The default base URL for projects and tasks
+  --od=outfiles_dir Where to put generated/downloaded files
+  -h --help         Show this screen.
+  --version         Show version.
 """
 
 from docopt import docopt
