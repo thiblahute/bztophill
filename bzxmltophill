@@ -3,10 +3,9 @@
 """Converts Bugzilla XML files to something Phabricator's Phill may like.
 
 Usage:
-  bzxmltophill <bz.xml> <outfile> [--od=utfiles_dir]
+  bzxmltophill <data>
 
 Options:
-  --od=outfiles_dir Where to put generated/downloaded files
   -h --help         Show this screen.
   --version         Show version.
 """
@@ -17,6 +16,7 @@ import xml.etree.ElementTree as ET
 import json
 import os
 import re
+import glob
 
 try:
     from config import project_ids
@@ -31,27 +31,20 @@ except:
 class Converter:
     def __init__(self):
         self.root = None
-        self.projects = []
-        self.tasks = []
 
     def url(self, i):
         return self.base_url + "/show_bug.cgi?id=" + i.findtext("bug_id")
 
     def load(self, filename):
-        try:
-            os.mkdir("attachements/")
-        except FileExistsError:
-            pass
-
         self.root = ET.parse(filename).getroot()
         self.base_url = self.root.get("urlbase")
 
     def convert(self):
-        self.projects_convert()
-        self.issues_convert()
+        projects = self.projects_convert()
+        tasks = self.issues_convert()
         r = {
-            'projects': self.projects,
-            'tasks': self.tasks
+            'projects': projects,
+            'tasks': tasks
         }
         return r
 
@@ -104,6 +97,7 @@ class Converter:
                                                   project_name,
                                                   bug)
                     all_projects[project_id] = project
+        return [p for _, p in sorted(all_projects.items())]
 
     def create_project(self, pid, name, bug):
         ret = {
@@ -124,7 +118,6 @@ class Converter:
                 members.append(member.text)
 
         ret['members'] = list(set(members))
-        self.projects.append(ret)
         return ret
 
     def transaction_create(self, actor, date, kind, value=None, comment=None):
@@ -140,8 +133,8 @@ class Converter:
         return ret
 
     def issues_convert(self):
-        for bug in self.root.findall("bug"):
-            self.issue_convert(bug)
+        tasks = [self.issue_convert(bug) for bug in self.root.findall("bug")]
+        return tasks
 
     def priority_parse(self, status):
         m = {
@@ -266,24 +259,24 @@ class Converter:
             'description': i.find("long_desc").findtext("thetext"),
             'transactions': self.convert_transactions(i)
         }
-        self.tasks.append(ret)
+        return ret
 
 
 def main(arguments):
-    filename = arguments['<bz.xml>']
-    outfiles_dir = arguments.get('-od', "outfiles")
-
-    try:
-        os.mkdir(outfiles_dir)
-    except FileExistsError:
-        pass
+    data = arguments.get("<data>")
+    if os.path.isdir(data):
+        filenames = glob.glob(os.path.join(data, "bugs.*.xml"))
+    else:
+        filenames = [data]
 
     converter = Converter()
 
-    converter.load(filename)
-    data = converter.convert()
+    for filename in filenames:
+        converter.load(filename)
+        data = converter.convert()
 
-    open(arguments["<outfile>"], 'w').write(json.dumps(data, sort_keys=True, indent=4))
+        with open(os.path.splitext(filename)[0]+".json", "w") as f:
+            json.dump(data, f, sort_keys=True, indent=4)
 
 if __name__ == '__main__':
     arguments = docopt(__doc__, version='bztophill 0.1')
